@@ -1,0 +1,217 @@
+version: '3.7'
+
+
+
+networks:
+  network-zabbix:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 172.22.158.0/24
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.6.1-pg14
+    networks:
+      - network-zabbix
+    container_name: timescaledb
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      POSTGRES_DB: zabbix
+      TS_TUNE_MAX_CONNS: 700
+      # TS_TUNE_MEMORY: 16GB
+      TS_TUNE_NUM_CPUS: 8
+    volumes:
+      - ./zbx_env/var/lib/postgresql/data:/var/lib/postgresql/data:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:${zabbix_version}-alpine
+    networks:
+      - network-zabbix
+    container_name: zabbix-server
+    environment:
+      DB_SERVER_HOST: timescaledb
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      # ZBX_VALUECACHESIZE: 32M
+      # ZBX_CACHESIZE: 256M
+      # ZBX_STARTPOLLERS: 200
+      # ZBX_STARTPOLLERSUNREACHABLE: 25
+      # ZBX_STARTPINGERS: 10
+      # ZBX_IPMIPOLLERS: 10
+      # ZBX_STARTREPORTWRITERS: 1
+      # ZBX_JAVAGATEWAY_ENABLE: true
+      # ZBX_JAVAGATEWAY: zabbix-java-gateway
+      # ZBX_JAVAGATEWAYPORT: 10052
+      # ZBX_STARTJAVAPOLLERS: 5
+      ZBX_TIMEOUT: 30
+    restart: unless-stopped
+    links:
+      - timescaledb
+    depends_on:
+      - timescaledb
+    volumes:
+      - ./zbx_env/usr/lib/zabbix/alertscripts:/usr/lib/zabbix/alertscripts:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:${zabbix_version}-alpine
+    networks:
+      - network-zabbix
+    container_name: zabbix-web
+    environment:
+      - DB_SERVER_HOST=timescaledb
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+      - ZBX_SERVER_HOST=zabbix-server
+      - PHP_TZ=Europe/Samara
+      - ZBX_SERVER_NAME=Test installation 6.0
+    ports:
+      - '28080:8080'
+    links:
+      - timescaledb
+      - zabbix-server
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - zabbix-server
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # - ./zbx_env/etc/openldap/ldap.conf:/etc/openldap/ldap.conf:ro
+  #     - /etc/ssl/nginx:/etc/ssl/nginx:ro
+  #     - /var/lib/zabbix/ssl/certs:/var/lib/zabbix/ssl/certs:ro
+  #     - /var/lib/zabbix/ssl/keys:/var/lib/zabbix/ssl/keys:ro
+ 
+  zabbix-agent:
+    container_name: zabbix-agent
+    image: zabbix/zabbix-agent2:${zabbix_version}-alpine
+    user: root
+    networks:
+      - network-zabbix
+    links:
+      - zabbix-server
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/run:/var/run
+      - ./zbx_env/etc/zabbix/zabbix_agentd.d:/etc/zabbix/zabbix_agentd.d:ro
+      - ./zbx_env/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+    # ports:
+    #   - '10050:10050'
+    environment:
+      - ZBX_HOSTNAME=Zabbix server
+      - ZBX_SERVER_HOST=zabbix-server
+
+  
+  # zweb:
+  #   container_name: zweb
+  #   image: zabbix/zabbix-agent2:${zabbix_version}-alpine
+  #   user: root
+  #   networks:
+  #     - network-zabbix
+  #   links:
+  #     - zabbix-server
+  #   restart: unless-stopped
+  #   # privileged: true
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
+  #     - /var/run:/var/run
+  #     - ./zbx_env/etc/zabbix/zabbix_agentd.d:/etc/zabbix/zabbix_agentd.d:ro
+  #     - ./zbx_env/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+  #   # ports:
+  #   #   - '10050:10050'
+  #   environment:
+  #     - ZBX_HOSTNAME=Zabbix server
+  #     - ZBX_SERVER_HOST=zabbix-server
+
+  # zabbix-corp-certs:
+  #   container_name: zabbix-corp-certs
+  #   image: holse/corp_certs:zabbix-agent2-latest
+  #   # build:  # ./zabbix-corp-certs
+  #   #   context: ./zabbix-corp-certs
+  #   #   args:
+  #   #     - zabbix_version=$zabbix_version
+  #   user: root
+  #   networks:
+  #     - network-zabbix
+  #   links:
+  #     - zabbix-server
+  #   restart: unless-stopped
+  #   privileged: true
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
+  #     - ./zbx_env/corp_certs:/var/lib/zabbix
+  #     # - /var/run:/var/run
+  #     # - ./zbx_env/etc/zabbix/zabbix_agentd.d.corp_certs:/etc/zabbix/zabbix_agentd.d:ro
+  #     # - ./zbx_env/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+  #     # - /var/run/docker.sock:/var/run/docker.sock
+  #   # ports:
+  #   #   - '10050:10050'
+  #   environment:
+  #     - ZBX_HOSTNAME=zabbix-corp-certs
+  #     - ZBX_SERVER_HOST=zabbix-server
+
+  # zabbix-java-gateway:
+  #   container_name: zabbix-java-gateway
+  #   image: zabbix/zabbix-java-gateway:${zabbix_version}-alpine
+  #   networks:
+  #     - network-zabbix
+  #   links:
+  #     - zabbix-server
+  #     - timescaledb
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
+  #   # environment:
+  #   #   - ZABBIX_OPTIONS="-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=12345 -Dcom.sun.management.jmxremote.rmi.port=12345 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.registry.ssl=false -Djava.rmi.server.hostname=zabbix-java-gateway"
+
+  # zabbix-backup:
+  #    build: ./zabbix-backup
+  #    networks:
+  #      - network-zabbix
+  #    container_name: zabbix-backup
+  #    environment:
+  #      DB_SERVER_HOST: timescaledb
+  #      POSTGRES_USER: zabbix
+  #      POSTGRES_PASSWORD: zabbix
+  #      BACKUP_DIR: /backup
+  #    links:
+  #      - timescaledb
+  #    depends_on:
+  #      - timescaledb
+  #    volumes:
+  #      - /etc/localtime:/etc/localtime:ro
+  #      - /etc/timezone:/etc/timezone:ro
+  #      - ./zbx_env/backup_db:/backup_db:rw
+  #      - /etc/bacula/psql/it-zbx6:/backup:rw
+  #    profiles:
+  #      - backup
+
+
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    networks:
+      - network-zabbix
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment: 
+      - GF_INSTALL_PLUGINS=alexanderzobnin-zabbix-app
+    
+    links:
+      - zabbix-server
+    depends_on:
+      - zabbix-server
