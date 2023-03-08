@@ -56,6 +56,7 @@ services:
       - timescaledb
     volumes:
       - ./zbx_env/usr/lib/zabbix/alertscripts:/usr/lib/zabbix/alertscripts:rw
+      - ./zbx_env/usr/lib/zabbix/externalscripts:/usr/lib/zabbix/externalscripts:rw
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
 
@@ -202,7 +203,7 @@ services:
 
   grafana:
     container_name: grafana
-    image: grafana/grafana
+    image: grafana/grafana:${grafana_version}
     networks:
       - network-zabbix
     restart: unless-stopped
